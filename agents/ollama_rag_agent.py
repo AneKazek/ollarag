@@ -1,70 +1,70 @@
 import os
-import streamlit as st
-from langchain.agents import AgentExecutor, create_react_agent, tool
+from langchain.agents import AgentExecutor, create_react_agent
 from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain import hub
+from langchain_core.prompts import PromptTemplate
+from langchain_core.messages import AIMessage, HumanMessage
 
-def create_ollama_rag_agent(llm, vectorstore, tavily_api_key):
-    tools = []
-    if vectorstore:
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-        @tool
-        def document_retriever(query: str) -> str:
-            """Searches and returns information from the local documents."""
-            docs = retriever.invoke(query)
-            return "\n\n".join([doc.page_content for doc in docs])
-        tools.append(document_retriever)
-
-    if tavily_api_key:
-        os.environ["TAVILY_API_KEY"] = tavily_api_key
-        search_tool = TavilySearchResults(max_results=3)
-        tools.append(search_tool)
+def create_ollama_rag_agent(llm, vectorstore):
+    """Create the RAG agent."""
+    retriever = vectorstore.as_retriever()
     
-    agent_prompt = hub.pull("hwchase17/react-chat")
-    
-    agent = create_react_agent(llm, tools, agent_prompt)
-    agent_executor = AgentExecutor(
-        agent=agent, 
-        tools=tools, 
-        verbose=False,
-        handle_parsing_errors=True
+    document_retriever_tool = create_retriever_tool(
+        retriever,
+        "document_retriever",
+        "Searches and returns information from the uploaded documents."
     )
+    
+    tavily_search_tool = TavilySearchResults(max_results=3)
+    
+    tools = [document_retriever_tool, tavily_search_tool]
+    
+    prompt_template = PromptTemplate.from_template(
+        """You are an AI assistant named OllaRAG. You are a helpful and harmless assistant.
+
+        TOOLS:
+        ------
+        You have access to the following tools:
+        {tools}
+
+        To use a tool, please use the following format:
+        ```
+        Thought: Do I need to use a tool? Yes
+        Action: the action to take, should be one of [{tool_names}]
+        Action Input: the input to the action
+        Observation: the result of the action
+        ```
+
+        When you have a response to say to the Human, or if you do not need to use a tool, you MUST use the format:
+        ```
+        Thought: Do I need to use a tool? No
+        Final Answer: [your response here]
+        ```
+
+        Begin!
+
+        Previous conversation history:
+        {chat_history}
+
+        New input: {input}
+        {agent_scratchpad}
+        """
+    )
+    
+    agent = create_react_agent(llm, tools, prompt_template)
+    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True)
+    
     return agent_executor
 
-def run_ollama_rag_agent(agent_executor, prompt, chat_history, vectorstore):
-    response_container = st.empty()
-    full_response = ""
-    sources = []
-    
-    stream_output = agent_executor.stream({
-        "input": prompt,
-        "chat_history": chat_history
-    })
+def run_ollama_rag_agent(agent_executor, input_text, chat_history):
+    """Run the RAG agent and get the response."""
+    response = agent_executor.invoke({"input": input_text, "chat_history": chat_history})
+    return response['output']
 
-    for chunk in stream_output:
-        if "output" in chunk:
-            full_response += chunk["output"]
-            response_container.markdown(full_response + "▌")
-        
-        if "intermediate_steps" in chunk:
-            for step in chunk["intermediate_steps"]:
-                action, observation = step
-                if action.tool == "document_retriever":
-                     retrieved_docs = vectorstore.as_retriever().invoke(action.tool_input)
-                     sources.extend(retrieved_docs)
-
-    response_container.markdown(full_response)
-    
-    unique_sources = list({doc.page_content: doc for doc in sources}.values())
-    return full_response, unique_sources
-
-def convert_chat_history(messages):
-    chat_history = []
-    for msg in messages[:-1]:
-        if msg["role"] == "user":
-            chat_history.append(HumanMessage(content=msg["content"]))
-        elif msg["role"] == "assistant":
-            chat_history.append(AIMessage(content=msg["content"]))
-    return chat_history
+def convert_chat_history(chat_history):
+    converted_history = []
+    for message in chat_history:
+        if message["role"] == "user":
+            converted_history.append(HumanMessage(content=message["content"]))
+        else:
+            converted_history.append(AIMessage(content=message["content"]))
+    return converted_history

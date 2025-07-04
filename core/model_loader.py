@@ -1,39 +1,35 @@
 import streamlit as st
 from langchain_community.llms import LlamaCpp
-from langchain_huggingface import HuggingFaceEmbeddings
-import os
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from config import settings
 
-@st.cache_resource(show_spinner="Memuat model embedding...")
-def load_embedding_model():
-    """
-    Memuat model embedding dari Hugging Face.
-    Model ini digunakan untuk mengubah teks menjadi vektor.
-    Hasilnya di-cache agar tidak perlu dimuat ulang setiap saat.
-    """
-    return HuggingFaceEmbeddings(model_name="BAAI/bge-base-en-v1.5")
-
-@st.cache_resource(show_spinner="Memuat LLM...")
+@st.cache_resource
 def load_llm(model_path, n_gpu_layers, n_ctx):
-    """
-    Memuat model bahasa besar (LLM) dari file GGUF lokal.
-    Menggunakan LlamaCpp untuk inferensi yang efisien.
-    Hasilnya di-cache untuk model path yang sama.
-    """
-    if not os.path.exists(model_path):
-        st.error(f"Error: File model tidak ditemukan di '{model_path}'")
-        return None
+    """Load the LlamaCpp model."""
     try:
         llm = LlamaCpp(
             model_path=model_path,
             n_gpu_layers=n_gpu_layers,
-            n_ctx=n_ctx,
-            temperature=0.2,
-            max_tokens=4096,
             n_batch=512,
-            verbose=False,
-            streaming=True,
+            n_ctx=n_ctx,
+            f16_kv=True,
+            verbose=True,
         )
         return llm
     except Exception as e:
-        st.error(f"Gagal memuat model: {e}")
+        st.error(f"Error loading LLM: {e}")
+        return None
+
+@st.cache_resource
+def load_embedding_model(model_name):
+    """Load the embedding model."""
+    try:
+        model_path = settings.AVAILABLE_EMBEDDING_MODELS.get(model_name)
+        if not model_path:
+            st.error(f"Model embedding '{model_name}' tidak ditemukan.")
+            return None
+        embeddings = HuggingFaceEmbeddings(model_name=model_path, model_kwargs={'device': 'cpu'})
+        return embeddings
+    except Exception as e:
+        st.error(f"Error loading embedding model: {e}")
         return None
