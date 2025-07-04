@@ -1,0 +1,12 @@
+streamlit
+langchain
+langchain-community
+langchain-huggingface
+langchain-core
+langchain-chroma
+langchain-openai
+langchainhub
+llama-cpp-python
+faiss-cpu
+pypdf
+tavily-python
